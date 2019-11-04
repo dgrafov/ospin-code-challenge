@@ -1,0 +1,12 @@
+Please use whatever language you like.
+Pseudo code for a rough outline has been provided.
+
+```
+listener = subscribeToChannel('command')
+
+listener.onMessage('command') do | message | {
+  if (message.topic === 'open-ssh') {
+    handleOpenSsh(message)
+  }
+}
+```
