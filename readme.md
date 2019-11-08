@@ -18,17 +18,43 @@ With a fleet of devices running bioprocesses around the world, it is important t
 
 - Multiple users need to be able to connect to the device at the same time. (Bonus if they can somehow screen-share their ssh session!)
 
-#### Architecture
-Please provide a _high level_ architectural overview of how you would go about implementing this on the firmware/device side of our stack. Use this repository in whatever way you believe is most effective at communicating your thoughts. Please use and edit this README file as the entry point to understanding your implementation.
+### Architecture
+The OSPIN device should build a reverse SSH tunnel to the OSPIN server upon the MQTT request. The payload of a responding MQTT message should contain the number of the server port, which is forwarded to the device.
+Then an OSPIN employee could login into the server and use this tunnel to connect to the device using ssh, without the need of the device to have a public IP address. Even more, screen sharing for ssh session can be achieved with the tool `screen` (available on Debian-based systems - I assume that OSPIN device is still based on RPi and therefore has Raspbian or something Debian-based).
 
-#### Implementation
-Please provide a _minimal_ implementation of how this would work in your language of choice. Your program should represent an application that is running on an OSPIN device.
+The client-side solution consists of two parts. One is a service which must be installed ([this one](https://github.com/jfathman/ssh-tunnel) is used almost as it is for demonstrating the solution) alongside the firmware. See **Device Setup** section of this file for details.
+The second part is the firmware program, which handles MQTT messages (out of scope of this solution - I assume it's implemented already and can provide sample implementation for that part upon the request), starts and stops the service the service. See **Firmware** section of this file for details.
 
-Assume that, at the start of your application, it has just received an MQTT request for an ssh session that was originally fired from a device fleet management view in a web app. Upon execution, the application should print a JSON payload to the terminal that could theoretically be sent in an MQTT message back to the web application.
+### Implementation
 
-Be mindful of your time, and do not implement everything that you may in a real production environment. Instead, implement the minimum, and take the time two tell us what you would expect the branch to need to be considered 'production ready'.
+#### Server Setup
+OSPIN Server requies some additional basic setup:
 
-## Submitting
-- When complete, please make a PR to this repository and shoot me an email: daniel.seehausen@ospin.de
+- a new user (let's call it **ssh-tunnel**) for port-forwarding should be added
+- the user should have access to ssh
+- the user should not have access to the shell or to super-user privilegies
+- ssh config should be changed for that user: disable password authorization, allow only remote tcp port forwarding
+- all the ssh public keys of the OSPIN devices should be stored on the server for that user (so that each device could connect without a password)
 
-- _do not_ place your name, or any other identifying information, anywhere in your submission's code or README (in the interest of fairness, we review applications blindly).
+#### Device Setup
+I assume that the firmware is installed and runs with superuser rights.
+
+- auto ssh should be installed
+- [ssh-tunnel](ssh-tunnel) script should be installed as a service
+- ssh public and private keys should be generated and public key should be copied to the OSPIN server (to ssh-tunnel user's authorized_keys file)
+
+#### Firmware
+C++ code is presented in file [main.cpp](main.cpp).
+The firmware must be run from a super-user session (to have access to ssh ports).
+I saw here two options for implementing the solution: to implement everything inside a firmware program (e.g. using [libssh](https://www.libssh.org/) library) or to use OpenSSH client (via autossh) and call it from C++ code using `system()` function.
+I chose the latter approach based on the time given and the fact, that those two tools are well-tested and proven working for this task. The disadvantage of this approach is lack of control (comparing to the first one): e.g. OpenSSH client returns only one error code for everything. So if the functionality provided by those two tools appears to be unsifficient after first prototype testing, I leave the possibility for custom implementation.
+
+Another problem is selection of the port number on the OSPIN server for the tunnel. As the feature is supposed to be used by OSPIN employees, I think it's fair to assume, that 150 ports should be enough for now - roughly 5-10 ports per person at once (newer firmwares can get broader/different port ranges). For the test program I limited the range of ports to try by 10 ports (for demonstration).
+Another approach would be to add desired port to the MQTT open-ssh message payload. Then the OSPIN employee would have to check available ports on OSPIN server, or additional implementation is required for the Web app so that it gets the list of free ports.
+
+#### Possible Improvements
+
+- Fully implement establishing of the SSH tunnel in C++ within the client's firmware (will improve possibility to control the behaviour, e.g. error handling)
+- With better error handling MQTT response payload can be enriched with more meaningful error messages/error codes.
+- Develop more robust port selection strategy
+- Investigate security-related configuration of the OSPIN server. I named some basic measurements for **ssh-tunnel** user, however I can imagine, that they are not complete - additional investigation is required.
